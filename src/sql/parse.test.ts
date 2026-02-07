@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { classifyStatement, parseStatements, splitStatements } from "./parse"
+import { classifyStatement, extractDdlTarget, parseStatements, splitStatements } from "./parse"
 
 describe("splitStatements", () => {
   test("splits simple semicolon-terminated statements", () => {
@@ -173,6 +173,51 @@ describe("classifyStatement", () => {
     const result = classifyStatement("VACUUM ANALYZE users;")
     expect(result.kind).toBe("unknown")
   })
+
+  test("classifies CREATE SEQUENCE as untracked", () => {
+    const result = classifyStatement("CREATE SEQUENCE my_seq START 1;")
+    expect(result.kind).toBe("untracked")
+  })
+
+  test("classifies ALTER SEQUENCE as untracked", () => {
+    const result = classifyStatement("ALTER SEQUENCE my_seq RESTART WITH 100;")
+    expect(result.kind).toBe("untracked")
+  })
+
+  test("classifies DROP SEQUENCE as untracked", () => {
+    const result = classifyStatement("DROP SEQUENCE IF EXISTS my_seq;")
+    expect(result.kind).toBe("untracked")
+  })
+
+  test("classifies CREATE MATERIALIZED VIEW as untracked", () => {
+    const result = classifyStatement('CREATE MATERIALIZED VIEW my_view AS SELECT * FROM "users";')
+    expect(result.kind).toBe("untracked")
+  })
+
+  test("classifies DROP MATERIALIZED VIEW as untracked", () => {
+    const result = classifyStatement("DROP MATERIALIZED VIEW IF EXISTS my_view;")
+    expect(result.kind).toBe("untracked")
+  })
+
+  test("classifies CREATE DOMAIN as untracked", () => {
+    const result = classifyStatement("CREATE DOMAIN email_type AS text CHECK (VALUE ~ '@');")
+    expect(result.kind).toBe("untracked")
+  })
+
+  test("classifies COMMENT ON as untracked", () => {
+    const result = classifyStatement("COMMENT ON TABLE users IS 'Main users table';")
+    expect(result.kind).toBe("untracked")
+  })
+
+  test("classifies CREATE AGGREGATE as untracked", () => {
+    const result = classifyStatement("CREATE AGGREGATE my_agg (integer) (sfunc = int4pl, stype = int4);")
+    expect(result.kind).toBe("untracked")
+  })
+
+  test("classifies CREATE RULE as untracked", () => {
+    const result = classifyStatement('CREATE RULE my_rule AS ON INSERT TO "users" DO NOTHING;')
+    expect(result.kind).toBe("untracked")
+  })
 })
 
 describe("parseStatements", () => {
@@ -195,5 +240,97 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO "app-user
     expect(stmts[0]?.kind).toBe("procedural")
     expect(stmts[1]?.kind).toBe("procedural")
     expect(stmts[2]?.kind).toBe("procedural")
+  })
+})
+
+describe("extractDdlTarget", () => {
+  test("extracts table from CREATE TABLE", () => {
+    const target = extractDdlTarget('CREATE TABLE "users" ("id" uuid);')
+    expect(target).toEqual({ table: "users" })
+  })
+
+  test("extracts table from ALTER TABLE", () => {
+    const target = extractDdlTarget('ALTER TABLE "users" ADD COLUMN "email" text;')
+    expect(target).toEqual({ table: "users" })
+  })
+
+  test("extracts table from DROP TABLE", () => {
+    const target = extractDdlTarget('DROP TABLE IF EXISTS "users";')
+    expect(target).toEqual({ table: "users" })
+  })
+
+  test("extracts table from schema-qualified CREATE TABLE", () => {
+    const target = extractDdlTarget('CREATE TABLE "public"."users" ("id" uuid);')
+    expect(target).toEqual({ table: "users" })
+  })
+
+  test("extracts table from CREATE INDEX ... ON", () => {
+    const target = extractDdlTarget('CREATE UNIQUE INDEX "users_email_idx" ON "users" USING btree ("email");')
+    expect(target).toEqual({ table: "users" })
+  })
+
+  test("extracts table from CREATE INDEX with schema-qualified ON", () => {
+    const target = extractDdlTarget('CREATE INDEX "idx" ON "public"."users" ("email");')
+    expect(target).toEqual({ table: "users" })
+  })
+
+  test("extracts index name from DROP INDEX without ON", () => {
+    const target = extractDdlTarget('DROP INDEX IF EXISTS "users_email_idx";')
+    expect(target).toEqual({ indexName: "users_email_idx" })
+  })
+
+  test("extracts index name from ALTER INDEX without ON", () => {
+    const target = extractDdlTarget('ALTER INDEX "users_email_idx" RENAME TO "idx_email";')
+    expect(target).toEqual({ indexName: "users_email_idx" })
+  })
+
+  test("extracts table from CREATE POLICY ... ON", () => {
+    const target = extractDdlTarget('CREATE POLICY "users_policy" ON "users" FOR SELECT USING (true);')
+    expect(target).toEqual({ table: "users" })
+  })
+
+  test("extracts table from DROP POLICY ... ON", () => {
+    const target = extractDdlTarget('DROP POLICY "users_policy" ON "users";')
+    expect(target).toEqual({ table: "users" })
+  })
+
+  test("extracts entity from CREATE TYPE", () => {
+    const target = extractDdlTarget("CREATE TYPE \"status\" AS ENUM ('active', 'inactive');")
+    expect(target).toEqual({ entityType: "enums", entityName: "status" })
+  })
+
+  test("extracts entity from DROP TYPE", () => {
+    const target = extractDdlTarget('DROP TYPE IF EXISTS "status";')
+    expect(target).toEqual({ entityType: "enums", entityName: "status" })
+  })
+
+  test("extracts entity from CREATE ROLE", () => {
+    const target = extractDdlTarget('CREATE ROLE "app_user" WITH LOGIN;')
+    expect(target).toEqual({ entityType: "roles", entityName: "app_user" })
+  })
+
+  test("extracts entity from DROP ROLE", () => {
+    const target = extractDdlTarget('DROP ROLE IF EXISTS "app_user";')
+    expect(target).toEqual({ entityType: "roles", entityName: "app_user" })
+  })
+
+  test("returns null for CREATE SCHEMA", () => {
+    const target = extractDdlTarget('CREATE SCHEMA "my_schema";')
+    expect(target).toBeNull()
+  })
+
+  test("returns null for DROP SCHEMA", () => {
+    const target = extractDdlTarget('DROP SCHEMA "my_schema" CASCADE;')
+    expect(target).toBeNull()
+  })
+
+  test("extracts table from ALTER TABLE ENABLE RLS", () => {
+    const target = extractDdlTarget('ALTER TABLE "users" ENABLE ROW LEVEL SECURITY;')
+    expect(target).toEqual({ table: "users" })
+  })
+
+  test("returns null for unparseable SQL", () => {
+    const target = extractDdlTarget("VACUUM ANALYZE users;")
+    expect(target).toBeNull()
   })
 })

@@ -3,11 +3,13 @@ import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { formatRebaseResult } from "./run"
+import { formatRebasePlan } from "./rebase"
 import { backupMigrations, deleteMigrationDirs } from "../migration/backup"
 import { extractManualSlots, validateSlotOrdering } from "../migration/extract"
 import { createMigrationDir } from "../migration/create"
 import { buildSnapshotForManualDir, repairSnapshotChain } from "../snapshot/chain"
 import type { ClassifiedMigration, RebaseResult, Snapshot } from "../types"
+import type { RebasePlan } from "./rebase"
 
 function makeSnapshot(id: string, prevIds: string[], ddl: Snapshot["ddl"] = []): Snapshot {
   return { version: "8", dialect: "postgres", id, prevIds, ddl, renames: [] }
@@ -117,6 +119,61 @@ describe("formatRebaseResult", () => {
     expect(output).toContain("Regenerated migrations:")
     expect(output).not.toContain("Manual SQL")
     expect(output).toContain("Rebase complete.")
+  })
+})
+
+describe("formatRebasePlan steps", () => {
+  test("steps description does not mention push", () => {
+    const plan: RebasePlan = {
+      safeToDelete: [
+        {
+          dirName: "20250102000000_add_email",
+          dirPath: "/tmp/20250102000000_add_email",
+          sql: 'ALTER TABLE "users" ADD COLUMN "email" text;',
+          snapshot: { version: "8", dialect: "postgres", id: "x", prevIds: [], ddl: [], renames: [] },
+          timestamp: "20250102000000",
+          name: "add_email",
+          classification: "generated",
+          manualStatements: [],
+        },
+      ],
+      needsAttention: [],
+      kept: [],
+    }
+    const output = formatRebasePlan(plan)
+    expect(output).not.toContain("push")
+  })
+
+  test("steps with manual SQL does not mention push", () => {
+    const plan: RebasePlan = {
+      safeToDelete: [
+        {
+          dirName: "20250102000000_add_email",
+          dirPath: "/tmp/20250102000000_add_email",
+          sql: 'ALTER TABLE "users" ADD COLUMN "email" text;',
+          snapshot: { version: "8", dialect: "postgres", id: "x", prevIds: [], ddl: [], renames: [] },
+          timestamp: "20250102000000",
+          name: "add_email",
+          classification: "generated",
+          manualStatements: [],
+        },
+      ],
+      needsAttention: [
+        {
+          dirName: "20250103000000_backfill",
+          dirPath: "/tmp/20250103000000_backfill",
+          sql: "UPDATE users SET email = 'x';",
+          snapshot: { version: "8", dialect: "postgres", id: "y", prevIds: ["x"], ddl: [], renames: [] },
+          timestamp: "20250103000000",
+          name: "backfill",
+          classification: "manual",
+          manualStatements: ["UPDATE users SET email = 'x';"],
+        },
+      ],
+      kept: [],
+    }
+    const output = formatRebasePlan(plan)
+    expect(output).not.toContain("push")
   })
 })
 
@@ -232,8 +289,8 @@ describe("splice integration", () => {
       'UPDATE "users" SET "email" = \'test@test.com\' WHERE "email" IS NULL;',
     ])
 
-    const backups = backupMigrations(myMigrations)
-    expect(backups).toHaveLength(2)
+    const handle = await backupMigrations(testDir, myMigrations)
+    expect(handle.backedUpDirNames).toHaveLength(2)
 
     await deleteMigrationDirs(myMigrations)
 

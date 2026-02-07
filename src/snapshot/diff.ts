@@ -90,3 +90,37 @@ export function touchedTables(diff: SnapshotDiff): Set<string> {
 
   return tables
 }
+
+export function diffHasEntity(diff: SnapshotDiff, entityType: string, name: string): boolean {
+  function matches(entity: DdlEntity): boolean {
+    return entity.entityType === entityType && entity.name === name
+  }
+
+  for (const e of diff.added) {
+    if (matches(e)) return true
+  }
+  for (const e of diff.removed) {
+    if (matches(e)) return true
+  }
+  for (const { before, after } of diff.modified) {
+    if (matches(before) || matches(after)) return true
+  }
+  return false
+}
+
+export function diffHasIndex(diff: SnapshotDiff, indexName: string): boolean {
+  function matches(entity: DdlEntity): boolean {
+    return entity.entityType === "indexes" && entity.name === indexName
+  }
+
+  for (const e of diff.added) {
+    if (matches(e)) return true
+  }
+  for (const e of diff.removed) {
+    if (matches(e)) return true
+  }
+  for (const { before, after } of diff.modified) {
+    if (matches(before) || matches(after)) return true
+  }
+  return false
+}

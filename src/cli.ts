@@ -15,13 +15,14 @@ Usage:
   drizzle-rebase plan [--dir <path>] [--base <branch>]
     Show what would happen during a rebase (dry run).
 
-  drizzle-rebase run [--dir <path>] [--base <branch>]
+  drizzle-rebase run [--dir <path>] [--base <branch>] [--push]
     Autonomous rebase: delete your migrations, regenerate DDL,
-    splice manual SQL back in, and push to sync local DB.
+    and splice manual SQL back in.
 
 Options:
   --dir <path>      Path to migrations directory (default: ./drizzle)
   --base <branch>   Base branch to compare against (default: main)
+  --push            Run drizzle-kit push after a successful rebase
   --help            Show this help message
 `.trim()
 
@@ -83,7 +84,7 @@ async function main() {
       console.log(formatRebasePlan(plan))
       console.log("")
 
-      const result = await executeRebase({ migrationsDir, cwd, plan })
+      const result = await executeRebase({ migrationsDir, cwd, plan, push: args.push === true })
       console.log(formatRebaseResult(result))
 
       if (!result.success) {

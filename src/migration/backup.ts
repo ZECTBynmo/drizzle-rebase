@@ -1,22 +1,42 @@
-import { mkdir, rm, writeFile } from "node:fs/promises"
+import { cp, mkdir, rm } from "node:fs/promises"
 import { join } from "node:path"
-import type { ClassifiedMigration, MigrationBackup } from "../types"
+import type { ClassifiedMigration, BackupHandle } from "../types"
 
-export function backupMigrations(migrations: ClassifiedMigration[]): MigrationBackup[] {
-  return migrations.map((m) => ({
-    dirName: m.dirName,
-    dirPath: m.dirPath,
-    sql: m.sql,
-    snapshot: structuredClone(m.snapshot),
-  }))
+const BACKUP_DIR_NAME = ".drizzle-rebase-backup"
+
+export async function backupMigrations(
+  migrationsDir: string,
+  migrations: ClassifiedMigration[],
+): Promise<BackupHandle> {
+  const backupDir = join(migrationsDir, BACKUP_DIR_NAME)
+
+  // Remove stale backup if present
+  await rm(backupDir, { recursive: true, force: true })
+  await mkdir(backupDir, { recursive: true })
+
+  const backedUpDirNames: string[] = []
+
+  for (const m of migrations) {
+    await cp(m.dirPath, join(backupDir, m.dirName), { recursive: true })
+    backedUpDirNames.push(m.dirName)
+  }
+
+  return { backupDir, backedUpDirNames }
 }
 
-export async function restoreMigrations(backups: MigrationBackup[]): Promise<void> {
-  for (const backup of backups) {
-    await mkdir(backup.dirPath, { recursive: true })
-    await writeFile(join(backup.dirPath, "migration.sql"), backup.sql)
-    await writeFile(join(backup.dirPath, "snapshot.json"), JSON.stringify(backup.snapshot, null, 2))
+export async function restoreMigrations(
+  migrationsDir: string,
+  handle: BackupHandle,
+): Promise<void> {
+  for (const dirName of handle.backedUpDirNames) {
+    const src = join(handle.backupDir, dirName)
+    const dest = join(migrationsDir, dirName)
+    await cp(src, dest, { recursive: true })
   }
+}
+
+export async function cleanupBackup(handle: BackupHandle): Promise<void> {
+  await rm(handle.backupDir, { recursive: true, force: true })
 }
 
 export async function deleteMigrationDirs(migrations: ClassifiedMigration[]): Promise<string[]> {

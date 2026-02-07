@@ -96,9 +96,9 @@ export function formatRebasePlan(plan: RebasePlan): string {
 
   lines.push("")
   if (plan.needsAttention.length > 0) {
-    lines.push("Steps: delete → drizzle-kit generate → splice manual SQL → repair snapshots → push")
+    lines.push("Steps: delete → drizzle-kit generate → splice manual SQL → repair snapshots")
   } else {
-    lines.push("Steps: delete → drizzle-kit generate → push")
+    lines.push("Steps: delete → drizzle-kit generate")
   }
 
   return lines.join("\n")

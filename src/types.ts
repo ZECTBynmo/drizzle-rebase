@@ -141,9 +141,7 @@ export interface RebaseResult {
   error?: string
 }
 
-export interface MigrationBackup {
-  dirName: string
-  dirPath: string
-  sql: string
-  snapshot: Snapshot
+export interface BackupHandle {
+  backupDir: string
+  backedUpDirNames: string[]
 }

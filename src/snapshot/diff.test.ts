@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test"
 import { join } from "node:path"
-import { diffSnapshots, isEmptyDiff, touchedTables } from "./diff"
+import { diffHasEntity, diffHasIndex, diffSnapshots, isEmptyDiff, touchedTables } from "./diff"
 import { parseSnapshot } from "./parse"
+import type { SnapshotDiff } from "./diff"
+import type { DdlEntity } from "../types"
 
 const FIXTURES = join(import.meta.dir, "../__fixtures__")
 
@@ -99,5 +101,91 @@ describe("touchedTables", () => {
     const diff = diffSnapshots(s1, s2)
     const tables = touchedTables(diff)
     expect(tables.size).toBe(0)
+  })
+})
+
+describe("diffHasEntity", () => {
+  test("finds added enum", () => {
+    const enumEntity: DdlEntity = {
+      entityType: "enums",
+      name: "status",
+      schema: "public",
+      values: ["active", "inactive"],
+    }
+    const diff: SnapshotDiff = { added: [enumEntity], removed: [], modified: [] }
+    expect(diffHasEntity(diff, "enums", "status")).toBe(true)
+  })
+
+  test("does not find missing enum", () => {
+    const diff: SnapshotDiff = { added: [], removed: [], modified: [] }
+    expect(diffHasEntity(diff, "enums", "status")).toBe(false)
+  })
+
+  test("finds removed role", () => {
+    const roleEntity: DdlEntity = {
+      entityType: "roles",
+      name: "app_user",
+      superuser: null,
+      createDb: false,
+      createRole: false,
+      inherit: true,
+      canLogin: true,
+      replication: null,
+      bypassRls: null,
+      connLimit: null,
+      password: null,
+      validUntil: null,
+    }
+    const diff: SnapshotDiff = { added: [], removed: [roleEntity], modified: [] }
+    expect(diffHasEntity(diff, "roles", "app_user")).toBe(true)
+  })
+
+  test("does not match wrong entity type", () => {
+    const enumEntity: DdlEntity = {
+      entityType: "enums",
+      name: "status",
+      schema: "public",
+      values: ["active"],
+    }
+    const diff: SnapshotDiff = { added: [enumEntity], removed: [], modified: [] }
+    expect(diffHasEntity(diff, "roles", "status")).toBe(false)
+  })
+
+  test("finds modified entity", () => {
+    const before: DdlEntity = {
+      entityType: "enums",
+      name: "status",
+      schema: "public",
+      values: ["active"],
+    }
+    const after: DdlEntity = {
+      entityType: "enums",
+      name: "status",
+      schema: "public",
+      values: ["active", "inactive"],
+    }
+    const diff: SnapshotDiff = { added: [], removed: [], modified: [{ before, after }] }
+    expect(diffHasEntity(diff, "enums", "status")).toBe(true)
+  })
+})
+
+describe("diffHasIndex", () => {
+  test("finds added index by name", async () => {
+    const before = await parseSnapshot(join(FIXTURES, "20250105000000_mixed_ddl_dml/snapshot.json"))
+    const after = await parseSnapshot(join(FIXTURES, "20250106000000_add_index/snapshot.json"))
+    const diff = diffSnapshots(before, after)
+    expect(diffHasIndex(diff, "users_email_idx")).toBe(true)
+  })
+
+  test("does not find missing index", async () => {
+    const before = await parseSnapshot(join(FIXTURES, "20250105000000_mixed_ddl_dml/snapshot.json"))
+    const after = await parseSnapshot(join(FIXTURES, "20250106000000_add_index/snapshot.json"))
+    const diff = diffSnapshots(before, after)
+    expect(diffHasIndex(diff, "nonexistent_idx")).toBe(false)
+  })
+
+  test("does not find index in empty diff", () => {
+    const diff: SnapshotDiff = { added: [], removed: [], modified: [] }
+    expect(diffHasIndex(diff, "any_idx")).toBe(false)
   })
 })

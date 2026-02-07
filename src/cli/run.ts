@@ -1,6 +1,6 @@
 import { readdir, rm } from "node:fs/promises"
 import { drizzleGenerate, drizzlePush } from "../drizzle"
-import { backupMigrations, deleteMigrationDirs, restoreMigrations } from "../migration/backup"
+import { backupMigrations, cleanupBackup, deleteMigrationDirs, restoreMigrations } from "../migration/backup"
 import { createMigrationDir } from "../migration/create"
 import { extractManualSlots, validateSlotOrdering } from "../migration/extract"
 import { buildSnapshotForManualDir, repairSnapshotChain } from "../snapshot/chain"
@@ -13,12 +13,14 @@ interface ExecuteRebaseOptions {
   migrationsDir: string
   cwd: string
   plan: RebasePlan
+  push?: boolean
 }
 
 export async function executeRebase({
   migrationsDir,
   cwd,
   plan,
+  push,
 }: ExecuteRebaseOptions): Promise<RebaseResult> {
   const myMigrations = [...plan.safeToDelete, ...plan.needsAttention].sort((a, b) =>
     a.timestamp.localeCompare(b.timestamp),
@@ -48,12 +50,14 @@ export async function executeRebase({
   const lastKept = plan.kept[plan.kept.length - 1]
   const manualSlots = extractManualSlots(myMigrations)
 
-  const backups = backupMigrations(myMigrations)
+  const handle = await backupMigrations(migrationsDir, myMigrations)
+  console.log(`Backup saved to: ${handle.backupDir}`)
 
   try {
     await deleteMigrationDirs(myMigrations)
   } catch (err) {
-    await restoreMigrations(backups)
+    await restoreMigrations(migrationsDir, handle)
+    await cleanupBackup(handle)
     return {
       deleted: [],
       generated: [],
@@ -73,7 +77,8 @@ export async function executeRebase({
         await rm(join(migrationsDir, entry), { recursive: true, force: true })
       }
     }
-    await restoreMigrations(backups)
+    await restoreMigrations(migrationsDir, handle)
+    await cleanupBackup(handle)
     return {
       deleted: [],
       generated: [],
@@ -134,7 +139,8 @@ export async function executeRebase({
       for (const dirName of [...genResult.newDirs, ...manualDirNames]) {
         await rm(join(migrationsDir, dirName), { recursive: true, force: true })
       }
-      await restoreMigrations(backups)
+      await restoreMigrations(migrationsDir, handle)
+      await cleanupBackup(handle)
       return {
         deleted: [],
         generated: [],
@@ -145,10 +151,14 @@ export async function executeRebase({
     }
   }
 
-  const pushResult = await drizzlePush({ cwd })
-  if (!pushResult.success) {
-    console.error(`Warning: drizzle-kit push failed:\n${pushResult.output}`)
-    console.error("Migrations were generated successfully. Run 'drizzle-kit push' manually.")
+  await cleanupBackup(handle)
+
+  if (push) {
+    const pushResult = await drizzlePush({ cwd })
+    if (!pushResult.success) {
+      console.error(`Warning: drizzle-kit push failed:\n${pushResult.output}`)
+      console.error("Migrations were generated successfully. Run 'drizzle-kit push' manually.")
+    }
   }
 
   return {
