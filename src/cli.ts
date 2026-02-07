@@ -3,6 +3,7 @@
 import { resolve } from "node:path"
 import { detect, formatDetectResult } from "./cli/detect"
 import { formatRebasePlan, planRebase } from "./cli/rebase"
+import { executeRebase, formatRebaseResult } from "./cli/run"
 
 const HELP = `
 drizzle-rebase — Detect and resolve Drizzle migration conflicts across git branches
@@ -15,8 +16,8 @@ Usage:
     Show what would happen during a rebase (dry run).
 
   drizzle-rebase run [--dir <path>] [--base <branch>]
-    Delete generated-only migrations from your branch and
-    prompt to run drizzle-kit generate + push.
+    Autonomous rebase: delete your migrations, regenerate DDL,
+    splice manual SQL back in, and push to sync local DB.
 
 Options:
   --dir <path>      Path to migrations directory (default: ./drizzle)
@@ -78,31 +79,16 @@ async function main() {
     }
 
     case "run": {
-      const { rm } = await import("node:fs/promises")
       const plan = await planRebase({ migrationsDir, baseBranch, cwd })
       console.log(formatRebasePlan(plan))
+      console.log("")
 
-      if (plan.needsAttention.length > 0) {
-        console.log("\nSome migrations contain manual SQL and cannot be auto-deleted.")
-        console.log("Please handle them manually before continuing.")
+      const result = await executeRebase({ migrationsDir, cwd, plan })
+      console.log(formatRebaseResult(result))
+
+      if (!result.success) {
         process.exit(1)
       }
-
-      if (plan.safeToDelete.length === 0) {
-        console.log("\nNothing to do.")
-        process.exit(0)
-      }
-
-      console.log(`\nDeleting ${plan.safeToDelete.length} generated migration(s)...`)
-
-      for (const m of plan.safeToDelete) {
-        await rm(m.dirPath, { recursive: true })
-        console.log(`  Deleted ${m.dirName}`)
-      }
-
-      console.log("\nDone. Next steps:")
-      console.log("  1. Run: drizzle-kit generate")
-      console.log("  2. Run: drizzle-kit push     (to sync local DB)")
       break
     }
 

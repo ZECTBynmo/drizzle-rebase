@@ -126,10 +126,24 @@ export interface ClassifiedMigration extends Migration {
   manualStatements: string[]
 }
 
-export interface RebaseContext {
-  migrationsDir: string
-  baseBranch: string
-  currentBranch: string
-  myMigrations: ClassifiedMigration[]
-  theirMigrations: Migration[]
+export interface ManualSlot {
+  originalIndex: number
+  sql: string[]
+  originalDirName: string
+  classification: "manual" | "mixed"
+}
+
+export interface RebaseResult {
+  deleted: string[]
+  generated: string[]
+  manualDirs: string[]
+  success: boolean
+  error?: string
+}
+
+export interface MigrationBackup {
+  dirName: string
+  dirPath: string
+  sql: string
+  snapshot: Snapshot
 }

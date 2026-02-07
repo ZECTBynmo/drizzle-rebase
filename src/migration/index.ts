@@ -1,2 +1,7 @@
 export { scanMigrations } from "./scan"
 export { classifyMigration, classifyAll } from "./classify"
+export { extractManualSlots, validateSlotOrdering } from "./extract"
+export type { InterleaveCheck } from "./extract"
+export { backupMigrations, restoreMigrations, deleteMigrationDirs } from "./backup"
+export { createMigrationDir, nextTimestamp } from "./create"
+export type { CreateMigrationDirOptions, CreatedMigrationDir } from "./create"

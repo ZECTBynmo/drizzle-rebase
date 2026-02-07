@@ -1,13 +1,13 @@
 import { basename, dirname } from "node:path"
 import { getAddedFiles, getMergeBase } from "../git"
 import { classifyAll, scanMigrations } from "../migration"
+import { validateSlotOrdering } from "../migration/extract"
 import type { ClassifiedMigration } from "../types"
 
-interface RebaseOptions {
+interface PlanRebaseOptions {
   migrationsDir: string
   baseBranch: string
   cwd: string
-  dryRun: boolean
 }
 
 export interface RebasePlan {
@@ -20,7 +20,7 @@ export async function planRebase({
   migrationsDir,
   baseBranch,
   cwd,
-}: Omit<RebaseOptions, "dryRun">): Promise<RebasePlan> {
+}: PlanRebaseOptions): Promise<RebasePlan> {
   const mergeBase = await getMergeBase(cwd, baseBranch)
   const addedFiles = await getAddedFiles(cwd, mergeBase, migrationsDir)
 
@@ -49,18 +49,44 @@ export async function planRebase({
 export function formatRebasePlan(plan: RebasePlan): string {
   const lines: string[] = []
 
-  if (plan.safeToDelete.length > 0) {
-    lines.push("Will delete (generated, safe to regenerate):")
-    for (const m of plan.safeToDelete) {
-      lines.push(`  - ${m.dirName}`)
+  if (plan.safeToDelete.length === 0 && plan.needsAttention.length === 0) {
+    lines.push("No migrations from your branch found. Nothing to rebase.")
+    return lines.join("\n")
+  }
+
+  const allMine = [...plan.safeToDelete, ...plan.needsAttention].sort((a, b) =>
+    a.timestamp.localeCompare(b.timestamp),
+  )
+
+  if (plan.needsAttention.length > 0) {
+    const interleaveCheck = validateSlotOrdering(allMine)
+    if (!interleaveCheck.safe && interleaveCheck.problemSlot) {
+      lines.push("BLOCKED: Manual SQL is interleaved between generated migrations.")
+      lines.push("")
+      lines.push(
+        `  Problem: "${interleaveCheck.problemSlot.originalDirName}" has generated migrations on both sides.`,
+      )
+      lines.push("  When drizzle-kit regenerates, it combines all DDL into one migration,")
+      lines.push(
+        "  so manual SQL that depends on intermediate DDL steps cannot be placed correctly.",
+      )
+      lines.push("")
+      lines.push("  Fix: split your branch so manual migrations come after all generated ones.")
+      return lines.join("\n")
     }
+  }
+
+  lines.push("Will delete and regenerate:")
+  for (const m of allMine) {
+    const tag = m.classification === "generated" ? "generated" : m.classification
+    lines.push(`  - ${m.dirName} [${tag}]`)
   }
 
   if (plan.needsAttention.length > 0) {
     lines.push("")
-    lines.push("Needs manual attention (contains manual SQL):")
+    lines.push("Will splice manual SQL back after regenerated DDL:")
     for (const m of plan.needsAttention) {
-      lines.push(`  ! ${m.dirName} [${m.classification}]`)
+      lines.push(`  ~ ${m.dirName}`)
       for (const stmt of m.manualStatements) {
         const preview = stmt.split("\n")[0]?.slice(0, 80) ?? ""
         lines.push(`      ${preview}`)
@@ -68,8 +94,11 @@ export function formatRebasePlan(plan: RebasePlan): string {
     }
   }
 
-  if (plan.safeToDelete.length === 0 && plan.needsAttention.length === 0) {
-    lines.push("No migrations from your branch found. Nothing to rebase.")
+  lines.push("")
+  if (plan.needsAttention.length > 0) {
+    lines.push("Steps: delete → drizzle-kit generate → splice manual SQL → repair snapshots → push")
+  } else {
+    lines.push("Steps: delete → drizzle-kit generate → push")
   }
 
   return lines.join("\n")
