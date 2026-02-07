@@ -67,6 +67,12 @@ export async function executeRebase({
 
   const genResult = await drizzleGenerate({ cwd, migrationsDir, existingDirs })
   if (!genResult.success) {
+    const afterEntries = (await readdir(migrationsDir)).filter((e) => /^\d{14}_/.test(e))
+    for (const entry of afterEntries) {
+      if (!existingDirs.has(entry)) {
+        await rm(join(migrationsDir, entry), { recursive: true, force: true })
+      }
+    }
     await restoreMigrations(backups)
     return {
       deleted: [],
@@ -89,7 +95,11 @@ export async function executeRebase({
       const lastTimestamp = lastEntry?.match(/^(\d{14})_/)?.[1]
 
       if (!lastEntry || !lastTimestamp) {
-        throw new Error("Could not determine last migration timestamp after generate")
+        throw new Error(
+          "No migrations exist after generate. This can happen when all your migrations " +
+            "are manual/mixed and there are no base migrations to anchor to. " +
+            "Consider keeping at least one generated migration before manual ones.",
+        )
       }
 
       const lastGenSnapshotPath = join(migrationsDir, lastEntry, "snapshot.json")
