@@ -1,0 +1,62 @@
+{
+  "version": "8",
+  "dialect": "postgres",
+  "id": "aaaa0000-0000-0000-0000-000000000003",
+  "prevIds": ["aaaa0000-0000-0000-0000-000000000002"],
+  "ddl": [
+    {
+      "entityType": "tables",
+      "name": "users",
+      "schema": "public",
+      "isRlsEnabled": false
+    },
+    {
+      "entityType": "columns",
+      "name": "id",
+      "schema": "public",
+      "table": "users",
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "gen_random_uuid()",
+      "generated": null,
+      "identity": null
+    },
+    {
+      "entityType": "columns",
+      "name": "name",
+      "schema": "public",
+      "table": "users",
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null
+    },
+    {
+      "entityType": "columns",
+      "name": "email",
+      "schema": "public",
+      "table": "users",
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null
+    },
+    {
+      "entityType": "pks",
+      "name": "users_pkey",
+      "schema": "public",
+      "table": "users",
+      "columns": ["id"],
+      "nameExplicit": false
+    }
+  ],
+  "renames": []
+}

@@ -1,0 +1,45 @@
+{
+  "name": "drizzle-rebase",
+  "version": "0.1.0",
+  "description": "Detect and resolve Drizzle ORM migration conflicts across git branches",
+  "type": "module",
+  "bin": {
+    "drizzle-rebase": "./dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "dev": "bun run src/cli.ts",
+    "build": "bun build src/cli.ts --outdir dist --target node",
+    "check": "bun run lint && bun run typecheck",
+    "lint": "eslint src/",
+    "lint:fix": "eslint src/ --fix",
+    "typecheck": "tsc --noEmit",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "bun test"
+  },
+  "keywords": [
+    "drizzle",
+    "drizzle-orm",
+    "migrations",
+    "merge",
+    "rebase",
+    "git",
+    "database"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/bun": "latest",
+    "eslint": "^10.0.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-prettier": "^5.5.5",
+    "prettier": "^3.8.1",
+    "typescript-eslint": "^8.54.0"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}
