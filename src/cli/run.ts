@@ -1,11 +1,8 @@
-import { readdir, rm } from "node:fs/promises"
-import { drizzleGenerate, drizzlePush } from "../drizzle"
+import { drizzlePush } from "../drizzle"
 import { backupMigrations, cleanupBackup, deleteMigrationDirs, restoreMigrations } from "../migration/backup"
 import { createMigrationDir } from "../migration/create"
-import { extractManualSlots, validateSlotOrdering } from "../migration/extract"
-import { buildSnapshotForManualDir, repairSnapshotChain } from "../snapshot/chain"
-import { parseSnapshot } from "../snapshot/parse"
-import { join } from "node:path"
+import { applyDiff, diffSnapshots, repairSnapshotChain } from "../snapshot"
+import type { SnapshotConflict } from "../snapshot"
 import type { RebaseResult } from "../types"
 import type { RebasePlan } from "./rebase"
 
@@ -22,37 +19,79 @@ export async function executeRebase({
   plan,
   push,
 }: ExecuteRebaseOptions): Promise<RebaseResult> {
+  // 1. Collect my migrations sorted by timestamp
   const myMigrations = [...plan.safeToDelete, ...plan.needsAttention].sort((a, b) =>
     a.timestamp.localeCompare(b.timestamp),
   )
 
   if (myMigrations.length === 0) {
-    return { deleted: [], generated: [], manualDirs: [], success: true }
+    return { deleted: [], rebased: [], success: true }
   }
 
-  const interleaveCheck = validateSlotOrdering(myMigrations)
-  if (!interleaveCheck.safe && interleaveCheck.problemSlot) {
-    const slot = interleaveCheck.problemSlot
-    return {
-      deleted: [],
-      generated: [],
-      manualDirs: [],
-      success: false,
-      error:
-        `Cannot auto-rebase: manual migration "${slot.originalDirName}" is interleaved between generated migrations.\n` +
-        `When drizzle-kit regenerates, it combines all DDL into one migration, so manual SQL\n` +
-        `that depends on intermediate DDL steps cannot be correctly placed.\n\n` +
-        `To fix: split your branch so manual migrations come after all generated ones, or\n` +
-        `handle this migration manually.`,
+  // 2. Find the original base snapshot for the first "my" migration
+  const firstMigration = myMigrations[0]!
+  let firstMigrationBase = null
+  const basePrevId = firstMigration.snapshot.prevIds[0]
+  if (basePrevId) {
+    const baseKept = plan.kept.find((m) => m.snapshot.id === basePrevId)
+    if (baseKept) {
+      firstMigrationBase = baseKept.snapshot
+    }
+  }
+  if (!firstMigrationBase) {
+    const keptBefore = plan.kept
+      .filter((m) => m.timestamp < firstMigration.timestamp)
+      .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
+    if (keptBefore[0]) {
+      firstMigrationBase = keptBefore[0].snapshot
     }
   }
 
-  const lastKept = plan.kept[plan.kept.length - 1]
-  const manualSlots = extractManualSlots(myMigrations)
+  // 3. Compute incremental diffs for each of my migrations
+  const diffs = myMigrations.map((migration, i) => {
+    const prevSnapshot = i === 0 ? firstMigrationBase : myMigrations[i - 1]!.snapshot
+    return diffSnapshots(prevSnapshot, migration.snapshot)
+  })
 
+  // 4. Backup my migrations
   const handle = await backupMigrations(migrationsDir, myMigrations)
   console.log(`Backup saved to: ${handle.backupDir}`)
 
+  // 5. Apply diffs sequentially onto "their" final snapshot
+  const lastKept = plan.kept[plan.kept.length - 1]
+  let runningSnapshot = lastKept?.snapshot ?? null
+  const allConflicts: SnapshotConflict[] = []
+  const rebasedSnapshots = []
+
+  for (let i = 0; i < myMigrations.length; i++) {
+    const diff = diffs[i]!
+    const prevId = runningSnapshot?.id ?? ""
+    const result = applyDiff(runningSnapshot, diff, prevId)
+
+    allConflicts.push(...result.conflicts)
+    runningSnapshot = result.snapshot
+    rebasedSnapshots.push(result.snapshot)
+  }
+
+  // 6. If conflicts → cleanup backup, report conflicts, fail
+  // (originals haven't been deleted yet, so no restore needed)
+  if (allConflicts.length > 0) {
+    await cleanupBackup(handle)
+
+    const conflictLines = allConflicts.map(
+      (c) => `  - ${c.type}: ${c.entityKey}`,
+    )
+    return {
+      deleted: [],
+      rebased: [],
+      success: false,
+      error:
+        `Snapshot conflicts detected during rebase:\n${conflictLines.join("\n")}\n\n` +
+        `Both branches modified the same entities. Resolve conflicts manually.`,
+    }
+  }
+
+  // 7. Delete old migration directories
   try {
     await deleteMigrationDirs(myMigrations)
   } catch (err) {
@@ -60,111 +99,70 @@ export async function executeRebase({
     await cleanupBackup(handle)
     return {
       deleted: [],
-      generated: [],
-      manualDirs: [],
+      rebased: [],
       success: false,
       error: `Failed to delete migrations: ${err instanceof Error ? err.message : String(err)}`,
     }
   }
 
-  const existingDirs = new Set((await readdir(migrationsDir)).filter((e) => /^\d{14}_/.test(e)))
+  // 8. Create new directories with new timestamps, original SQL, rebased snapshots
+  const deleted = myMigrations.map((m) => m.dirName)
+  const rebasedDirNames: string[] = []
+  const lastKeptTimestamp = lastKept?.timestamp ?? "00000000000000"
+  let currentTimestamp = lastKeptTimestamp
 
-  const genResult = await drizzleGenerate({ cwd, migrationsDir, existingDirs })
-  if (!genResult.success) {
-    const afterEntries = (await readdir(migrationsDir)).filter((e) => /^\d{14}_/.test(e))
-    for (const entry of afterEntries) {
-      if (!existingDirs.has(entry)) {
-        await rm(join(migrationsDir, entry), { recursive: true, force: true })
-      }
+  try {
+    for (let i = 0; i < myMigrations.length; i++) {
+      const migration = myMigrations[i]!
+      const snapshot = rebasedSnapshots[i]!
+
+      const created = await createMigrationDir({
+        migrationsDir,
+        name: migration.name,
+        sql: migration.sql,
+        snapshot,
+        afterTimestamp: currentTimestamp,
+      })
+
+      rebasedDirNames.push(created.dirName)
+      currentTimestamp = created.timestamp
+    }
+
+    // 9. Repair prevIds chain
+    const repairStart = lastKept ? lastKept.timestamp : ""
+    await repairSnapshotChain(migrationsDir, repairStart)
+  } catch (err) {
+    // Rollback: delete any newly created dirs and restore backup
+    const { rm } = await import("node:fs/promises")
+    const { join } = await import("node:path")
+    for (const dirName of rebasedDirNames) {
+      await rm(join(migrationsDir, dirName), { recursive: true, force: true })
     }
     await restoreMigrations(migrationsDir, handle)
     await cleanupBackup(handle)
     return {
       deleted: [],
-      generated: [],
-      manualDirs: [],
+      rebased: [],
       success: false,
-      error: `drizzle-kit generate failed:\n${genResult.output}`,
+      error: `Failed to create rebased migrations: ${err instanceof Error ? err.message : String(err)}`,
     }
   }
 
-  const deleted = myMigrations.map((m) => m.dirName)
-  const manualDirNames: string[] = []
-
-  if (manualSlots.length > 0) {
-    try {
-      const allEntriesAfterGen = (await readdir(migrationsDir))
-        .filter((e) => /^\d{14}_/.test(e))
-        .sort()
-      const lastEntry = allEntriesAfterGen[allEntriesAfterGen.length - 1]
-      const lastTimestamp = lastEntry?.match(/^(\d{14})_/)?.[1]
-
-      if (!lastEntry || !lastTimestamp) {
-        throw new Error(
-          "No migrations exist after generate. This can happen when all your migrations " +
-            "are manual/mixed and there are no base migrations to anchor to. " +
-            "Consider keeping at least one generated migration before manual ones.",
-        )
-      }
-
-      const lastGenSnapshotPath = join(migrationsDir, lastEntry, "snapshot.json")
-      let prevSnapshot = await parseSnapshot(lastGenSnapshotPath)
-      let currentTimestamp = lastTimestamp
-
-      for (const slot of manualSlots) {
-        const snapshot = buildSnapshotForManualDir(prevSnapshot)
-        const sqlContent = slot.sql.join("\n\n") + "\n"
-        const safeName = slot.originalDirName.replace(/^\d{14}_/, "")
-
-        const created = await createMigrationDir({
-          migrationsDir,
-          name: safeName,
-          sql: sqlContent,
-          snapshot,
-          afterTimestamp: currentTimestamp,
-        })
-
-        manualDirNames.push(created.dirName)
-        prevSnapshot = snapshot
-        currentTimestamp = created.timestamp
-      }
-
-      const repairStart = lastKept
-        ? lastKept.timestamp
-        : genResult.newDirs[0]?.match(/^(\d{14})_/)?.[1]
-      if (repairStart) {
-        await repairSnapshotChain(migrationsDir, repairStart)
-      }
-    } catch (err) {
-      for (const dirName of [...genResult.newDirs, ...manualDirNames]) {
-        await rm(join(migrationsDir, dirName), { recursive: true, force: true })
-      }
-      await restoreMigrations(migrationsDir, handle)
-      await cleanupBackup(handle)
-      return {
-        deleted: [],
-        generated: [],
-        manualDirs: [],
-        success: false,
-        error: `Failed to splice manual SQL: ${err instanceof Error ? err.message : String(err)}`,
-      }
-    }
-  }
-
+  // 10. Cleanup backup
   await cleanupBackup(handle)
 
+  // 11. Optionally push
   if (push) {
     const pushResult = await drizzlePush({ cwd })
     if (!pushResult.success) {
       console.error(`Warning: drizzle-kit push failed:\n${pushResult.output}`)
-      console.error("Migrations were generated successfully. Run 'drizzle-kit push' manually.")
+      console.error("Migrations were rebased successfully. Run 'drizzle-kit push' manually.")
     }
   }
 
   return {
     deleted,
-    generated: genResult.newDirs,
-    manualDirs: manualDirNames,
+    rebased: rebasedDirNames,
     success: true,
   }
 }
@@ -184,21 +182,14 @@ export function formatRebaseResult(result: RebaseResult): string {
     }
   }
 
-  if (result.generated.length > 0) {
-    lines.push("Regenerated migrations:")
-    for (const g of result.generated) {
-      lines.push(`  + ${g}`)
+  if (result.rebased.length > 0) {
+    lines.push("Rebased migrations:")
+    for (const r of result.rebased) {
+      lines.push(`  + ${r}`)
     }
   }
 
-  if (result.manualDirs.length > 0) {
-    lines.push("Manual SQL migrations created:")
-    for (const m of result.manualDirs) {
-      lines.push(`  ~ ${m}`)
-    }
-  }
-
-  if (result.deleted.length === 0 && result.generated.length === 0) {
+  if (result.deleted.length === 0 && result.rebased.length === 0) {
     lines.push("Nothing to do.")
   } else {
     lines.push("")

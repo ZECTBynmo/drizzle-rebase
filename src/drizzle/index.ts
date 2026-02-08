@@ -1,2 +1,2 @@
-export { drizzleGenerate, drizzlePush } from "./run"
-export type { DrizzleGenerateResult, DrizzlePushResult } from "./run"
+export { drizzlePush } from "./run"
+export type { DrizzlePushResult } from "./run"

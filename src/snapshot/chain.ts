@@ -2,16 +2,6 @@ import { readFile, readdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import type { Snapshot } from "../types"
 
-export function buildSnapshotForManualDir(previousSnapshot: Snapshot): Snapshot {
-  return {
-    ...previousSnapshot,
-    id: crypto.randomUUID(),
-    prevIds: [previousSnapshot.id],
-    ddl: structuredClone(previousSnapshot.ddl),
-    renames: [],
-  }
-}
-
 export async function repairSnapshotChain(
   migrationsDir: string,
   startAfter: string,

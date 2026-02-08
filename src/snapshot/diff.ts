@@ -21,6 +21,10 @@ function entityKey(entity: DdlEntity): string {
       return `${base}:${entity.schema}.${entity.table}.${entity.name}`
     case "roles":
       return `${base}:${entity.name}`
+    default: {
+      const _exhaustive: never = entity
+      throw new Error(`Unknown entity type: ${(_exhaustive as DdlEntity).entityType}`)
+    }
   }
 }
 
@@ -91,36 +95,80 @@ export function touchedTables(diff: SnapshotDiff): Set<string> {
   return tables
 }
 
-export function diffHasEntity(diff: SnapshotDiff, entityType: string, name: string): boolean {
-  function matches(entity: DdlEntity): boolean {
-    return entity.entityType === entityType && entity.name === name
-  }
-
-  for (const e of diff.added) {
-    if (matches(e)) return true
-  }
-  for (const e of diff.removed) {
-    if (matches(e)) return true
-  }
-  for (const { before, after } of diff.modified) {
-    if (matches(before) || matches(after)) return true
-  }
-  return false
+export interface SnapshotConflict {
+  entityKey: string
+  type: "add-exists" | "remove-modified" | "modify-diverged"
+  mine: DdlEntity
+  theirs: DdlEntity
 }
 
-export function diffHasIndex(diff: SnapshotDiff, indexName: string): boolean {
-  function matches(entity: DdlEntity): boolean {
-    return entity.entityType === "indexes" && entity.name === indexName
+export interface ApplyDiffResult {
+  snapshot: Snapshot
+  conflicts: SnapshotConflict[]
+}
+
+export function applyDiff(
+  base: Snapshot | null,
+  diff: SnapshotDiff,
+  prevId: string,
+): ApplyDiffResult {
+  const entityMap = new Map<string, DdlEntity>()
+  if (base) {
+    for (const entity of base.ddl) {
+      entityMap.set(entityKey(entity), structuredClone(entity))
+    }
   }
 
-  for (const e of diff.added) {
-    if (matches(e)) return true
+  const conflicts: SnapshotConflict[] = []
+
+  for (const entity of diff.added) {
+    const key = entityKey(entity)
+    const existing = entityMap.get(key)
+    if (existing) {
+      if (JSON.stringify(existing) !== JSON.stringify(entity)) {
+        conflicts.push({ entityKey: key, type: "add-exists", mine: entity, theirs: existing })
+      }
+      // identical → skip (already exists)
+    } else {
+      entityMap.set(key, structuredClone(entity))
+    }
   }
-  for (const e of diff.removed) {
-    if (matches(e)) return true
+
+  for (const entity of diff.removed) {
+    const key = entityKey(entity)
+    const existing = entityMap.get(key)
+    if (!existing) {
+      // doesn't exist → skip
+    } else if (JSON.stringify(existing) !== JSON.stringify(entity)) {
+      conflicts.push({ entityKey: key, type: "remove-modified", mine: entity, theirs: existing })
+    } else {
+      entityMap.delete(key)
+    }
   }
+
   for (const { before, after } of diff.modified) {
-    if (matches(before) || matches(after)) return true
+    const key = entityKey(before)
+    const existing = entityMap.get(key)
+    if (!existing) {
+      // entity doesn't exist in base — apply the after anyway
+      entityMap.set(key, structuredClone(after))
+    } else if (JSON.stringify(existing) !== JSON.stringify(before)) {
+      // base entity doesn't match before → they also modified it
+      conflicts.push({ entityKey: key, type: "modify-diverged", mine: after, theirs: existing })
+    } else {
+      entityMap.set(key, structuredClone(after))
+    }
   }
-  return false
+
+  const snapshot: Snapshot = {
+    version: base?.version ?? "8",
+    dialect: base?.dialect ?? "postgres",
+    id: crypto.randomUUID(),
+    prevIds: [prevId],
+    ddl: [...entityMap.values()],
+    renames: [],
+  }
+
+  return { snapshot, conflicts }
 }
+

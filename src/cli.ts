@@ -16,8 +16,8 @@ Usage:
     Show what would happen during a rebase (dry run).
 
   drizzle-rebase run [--dir <path>] [--base <branch>] [--push]
-    Autonomous rebase: delete your migrations, regenerate DDL,
-    and splice manual SQL back in.
+    Autonomous rebase: rebase snapshots and assign new timestamps,
+    preserving all SQL as-is.
 
 Options:
   --dir <path>      Path to migrations directory (default: ./drizzle)

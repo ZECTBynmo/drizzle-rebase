@@ -1,7 +1,1 @@
-export {
-  getCurrentBranch,
-  getMergeBase,
-  getAddedFiles,
-  getFilesOnBranch,
-  getRepoRoot,
-} from "./branch"
+export { getMergeBase, getAddedFiles } from "./branch"

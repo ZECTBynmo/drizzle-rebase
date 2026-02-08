@@ -3,9 +3,9 @@ import { join } from "node:path"
 import type { Snapshot } from "../types"
 
 export function nextTimestamp(after: string, existing: string[]): string {
-  let candidate = String(BigInt(after) + 1n)
+  let candidate = String(BigInt(after) + 1n).padStart(14, "0")
   while (existing.includes(candidate)) {
-    candidate = String(BigInt(candidate) + 1n)
+    candidate = String(BigInt(candidate) + 1n).padStart(14, "0")
   }
   return candidate
 }

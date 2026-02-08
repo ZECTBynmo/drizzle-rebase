@@ -1,7 +1,6 @@
 import { basename, dirname } from "node:path"
 import { getAddedFiles, getMergeBase } from "../git"
 import { classifyAll, scanMigrations } from "../migration"
-import { validateSlotOrdering } from "../migration/extract"
 import type { ClassifiedMigration } from "../types"
 
 interface PlanRebaseOptions {
@@ -58,25 +57,7 @@ export function formatRebasePlan(plan: RebasePlan): string {
     a.timestamp.localeCompare(b.timestamp),
   )
 
-  if (plan.needsAttention.length > 0) {
-    const interleaveCheck = validateSlotOrdering(allMine)
-    if (!interleaveCheck.safe && interleaveCheck.problemSlot) {
-      lines.push("BLOCKED: Manual SQL is interleaved between generated migrations.")
-      lines.push("")
-      lines.push(
-        `  Problem: "${interleaveCheck.problemSlot.originalDirName}" has generated migrations on both sides.`,
-      )
-      lines.push("  When drizzle-kit regenerates, it combines all DDL into one migration,")
-      lines.push(
-        "  so manual SQL that depends on intermediate DDL steps cannot be placed correctly.",
-      )
-      lines.push("")
-      lines.push("  Fix: split your branch so manual migrations come after all generated ones.")
-      return lines.join("\n")
-    }
-  }
-
-  lines.push("Will delete and regenerate:")
+  lines.push("Will rebase:")
   for (const m of allMine) {
     const tag = m.classification === "generated" ? "generated" : m.classification
     lines.push(`  - ${m.dirName} [${tag}]`)
@@ -84,7 +65,7 @@ export function formatRebasePlan(plan: RebasePlan): string {
 
   if (plan.needsAttention.length > 0) {
     lines.push("")
-    lines.push("Will splice manual SQL back after regenerated DDL:")
+    lines.push("Manual/mixed migrations (SQL will be preserved as-is):")
     for (const m of plan.needsAttention) {
       lines.push(`  ~ ${m.dirName}`)
       for (const stmt of m.manualStatements) {
@@ -95,11 +76,7 @@ export function formatRebasePlan(plan: RebasePlan): string {
   }
 
   lines.push("")
-  if (plan.needsAttention.length > 0) {
-    lines.push("Steps: delete → drizzle-kit generate → splice manual SQL → repair snapshots")
-  } else {
-    lines.push("Steps: delete → drizzle-kit generate")
-  }
+  lines.push("Steps: backup → rebase snapshots → assign new timestamps")
 
   return lines.join("\n")
 }

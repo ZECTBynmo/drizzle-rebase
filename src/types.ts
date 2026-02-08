@@ -126,17 +126,9 @@ export interface ClassifiedMigration extends Migration {
   manualStatements: string[]
 }
 
-export interface ManualSlot {
-  originalIndex: number
-  sql: string[]
-  originalDirName: string
-  classification: "manual" | "mixed"
-}
-
 export interface RebaseResult {
   deleted: string[]
-  generated: string[]
-  manualDirs: string[]
+  rebased: string[]
   success: boolean
   error?: string
 }

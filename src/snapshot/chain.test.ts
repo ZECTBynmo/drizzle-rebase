@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
-import { buildSnapshotForManualDir, repairSnapshotChain } from "./chain"
+import { repairSnapshotChain } from "./chain"
 import type { Snapshot } from "../types"
 
 function makeSnapshot(id: string, prevIds: string[] = []): Snapshot {
@@ -23,36 +23,9 @@ function makeSnapshot(id: string, prevIds: string[] = []): Snapshot {
   }
 }
 
-describe("buildSnapshotForManualDir", () => {
-  test("creates new snapshot with same DDL", () => {
-    const prev = makeSnapshot("prev-id", ["older-id"])
-    const result = buildSnapshotForManualDir(prev)
-
-    expect(result.id).not.toBe(prev.id)
-    expect(result.prevIds).toEqual([prev.id])
-    expect(result.ddl).toEqual(prev.ddl)
-    expect(result.version).toBe("8")
-    expect(result.dialect).toBe("postgres")
-  })
-
-  test("does not mutate the original snapshot", () => {
-    const prev = makeSnapshot("prev-id")
-    const originalDdl = JSON.stringify(prev.ddl)
-    buildSnapshotForManualDir(prev)
-    expect(JSON.stringify(prev.ddl)).toBe(originalDdl)
-  })
-
-  test("generates a valid UUID", () => {
-    const prev = makeSnapshot("prev-id")
-    const result = buildSnapshotForManualDir(prev)
-    expect(result.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)
-  })
-})
-
 describe("repairSnapshotChain", () => {
-  const testDir = join(tmpdir(), `drizzle-rebase-test-chain-${Date.now()}`)
-
   test("fixes prevIds for migrations after startAfter", async () => {
+    const testDir = join(tmpdir(), `drizzle-rebase-test-chain-${Date.now()}`)
     await mkdir(testDir, { recursive: true })
 
     const snap1 = makeSnapshot("id-1", [])
