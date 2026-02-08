@@ -1,6 +1,6 @@
 {
   "name": "drizzle-rebase",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Detect and resolve Drizzle ORM migration conflicts across git branches",
   "type": "module",
   "bin": {
