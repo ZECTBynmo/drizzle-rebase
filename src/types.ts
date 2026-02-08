@@ -119,13 +119,6 @@ export interface Migration {
   name: string
 }
 
-export type MigrationClassification = "generated" | "manual" | "mixed"
-
-export interface ClassifiedMigration extends Migration {
-  classification: MigrationClassification
-  manualStatements: string[]
-}
-
 export interface RebaseResult {
   deleted: string[]
   rebased: string[]

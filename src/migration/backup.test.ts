@@ -4,13 +4,13 @@ import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { backupMigrations, cleanupBackup, deleteMigrationDirs, restoreMigrations } from "./backup"
-import type { ClassifiedMigration, Snapshot } from "../types"
+import type { Migration, Snapshot } from "../types"
 
 function makeSnapshot(id: string): Snapshot {
   return { version: "8", dialect: "postgres", id, prevIds: [], ddl: [], renames: [] }
 }
 
-function makeMigration(name: string, dir: string): ClassifiedMigration {
+function makeMigration(name: string, dir: string): Migration {
   const timestamp = name.padStart(14, "0")
   return {
     dirName: `${timestamp}_${name}`,
@@ -19,12 +19,10 @@ function makeMigration(name: string, dir: string): ClassifiedMigration {
     snapshot: makeSnapshot(`id-${name}`),
     timestamp,
     name,
-    classification: "generated",
-    manualStatements: [],
   }
 }
 
-async function setupMigrationOnDisk(m: ClassifiedMigration): Promise<void> {
+async function setupMigrationOnDisk(m: Migration): Promise<void> {
   await mkdir(m.dirPath, { recursive: true })
   await writeFile(join(m.dirPath, "migration.sql"), m.sql)
   await writeFile(join(m.dirPath, "snapshot.json"), JSON.stringify(m.snapshot, null, 2))

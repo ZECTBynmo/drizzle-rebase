@@ -20,7 +20,7 @@ export async function executeRebase({
   push,
 }: ExecuteRebaseOptions): Promise<RebaseResult> {
   // 1. Collect my migrations sorted by timestamp
-  const myMigrations = [...plan.safeToDelete, ...plan.needsAttention].sort((a, b) =>
+  const myMigrations = [...plan.mine].sort((a, b) =>
     a.timestamp.localeCompare(b.timestamp),
   )
 

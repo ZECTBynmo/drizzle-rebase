@@ -7,7 +7,7 @@ import { formatRebasePlan } from "./rebase"
 import { backupMigrations, deleteMigrationDirs } from "../migration/backup"
 import { createMigrationDir } from "../migration/create"
 import { applyDiff, diffSnapshots, repairSnapshotChain } from "../snapshot"
-import type { ClassifiedMigration, RebaseResult, Snapshot } from "../types"
+import type { Migration, RebaseResult, Snapshot } from "../types"
 import type { RebasePlan } from "./rebase"
 
 function makeSnapshot(id: string, prevIds: string[], ddl: Snapshot["ddl"] = []): Snapshot {
@@ -117,7 +117,7 @@ describe("formatRebaseResult", () => {
 describe("formatRebasePlan steps", () => {
   test("steps description mentions snapshot rebase", () => {
     const plan: RebasePlan = {
-      safeToDelete: [
+      mine: [
         {
           dirName: "20250102000000_add_email",
           dirPath: "/tmp/20250102000000_add_email",
@@ -125,11 +125,8 @@ describe("formatRebasePlan steps", () => {
           snapshot: { version: "8", dialect: "postgres", id: "x", prevIds: [], ddl: [], renames: [] },
           timestamp: "20250102000000",
           name: "add_email",
-          classification: "generated",
-          manualStatements: [],
         },
       ],
-      needsAttention: [],
       kept: [],
     }
     const output = formatRebasePlan(plan)
@@ -141,7 +138,7 @@ describe("formatRebasePlan steps", () => {
 
   test("steps with manual SQL does not mention push or splice", () => {
     const plan: RebasePlan = {
-      safeToDelete: [
+      mine: [
         {
           dirName: "20250102000000_add_email",
           dirPath: "/tmp/20250102000000_add_email",
@@ -149,11 +146,7 @@ describe("formatRebasePlan steps", () => {
           snapshot: { version: "8", dialect: "postgres", id: "x", prevIds: [], ddl: [], renames: [] },
           timestamp: "20250102000000",
           name: "add_email",
-          classification: "generated",
-          manualStatements: [],
         },
-      ],
-      needsAttention: [
         {
           dirName: "20250103000000_backfill",
           dirPath: "/tmp/20250103000000_backfill",
@@ -161,8 +154,6 @@ describe("formatRebasePlan steps", () => {
           snapshot: { version: "8", dialect: "postgres", id: "y", prevIds: ["x"], ddl: [], renames: [] },
           timestamp: "20250103000000",
           name: "backfill",
-          classification: "manual",
-          manualStatements: ["UPDATE users SET email = 'x';"],
         },
       ],
       kept: [],
@@ -365,7 +356,7 @@ describe("snapshot rebase integration", () => {
     const myGenSnap = makeSnapshot("my-gen-1", ["their-1"], TABLE_WITH_EMAIL_DDL)
     const myManualSnap = makeSnapshot("my-manual-1", ["my-gen-1"], TABLE_WITH_EMAIL_DDL)
 
-    const myMigrations: ClassifiedMigration[] = [
+    const myMigrations: Migration[] = [
       {
         dirName: "20250102000000_add_email",
         dirPath: join(testDir, "20250102000000_add_email"),
@@ -373,8 +364,6 @@ describe("snapshot rebase integration", () => {
         snapshot: myGenSnap,
         timestamp: "20250102000000",
         name: "add_email",
-        classification: "generated",
-        manualStatements: [],
       },
       {
         dirName: "20250103000000_backfill_emails",
@@ -383,8 +372,6 @@ describe("snapshot rebase integration", () => {
         snapshot: myManualSnap,
         timestamp: "20250103000000",
         name: "backfill_emails",
-        classification: "manual",
-        manualStatements: ['UPDATE "users" SET "email" = \'test@test.com\' WHERE "email" IS NULL;'],
       },
     ]
 
@@ -474,7 +461,7 @@ describe("snapshot rebase integration", () => {
 
     const myGenSnap = makeSnapshot("my-gen-1", ["their-1"], TABLE_WITH_EMAIL_DDL)
 
-    const myMigrations: ClassifiedMigration[] = [
+    const myMigrations: Migration[] = [
       {
         dirName: "20250102000000_add_email",
         dirPath: join(testDir, "20250102000000_add_email"),
@@ -482,8 +469,6 @@ describe("snapshot rebase integration", () => {
         snapshot: myGenSnap,
         timestamp: "20250102000000",
         name: "add_email",
-        classification: "generated",
-        manualStatements: [],
       },
     ]
 
@@ -552,7 +537,7 @@ describe("executeRebase end-to-end", () => {
     await writeFile(join(myDir, "migration.sql"), originalSql)
     await writeFile(join(myDir, "snapshot.json"), JSON.stringify(mySnap, null, 2))
 
-    const kept: ClassifiedMigration[] = [
+    const kept: Migration[] = [
       {
         dirName: "20250101000000_initial",
         dirPath: theirDir,
@@ -560,12 +545,10 @@ describe("executeRebase end-to-end", () => {
         snapshot: theirSnap,
         timestamp: "20250101000000",
         name: "initial",
-        classification: "generated",
-        manualStatements: [],
       },
     ]
 
-    const mine: ClassifiedMigration[] = [
+    const mine: Migration[] = [
       {
         dirName: myDirName,
         dirPath: myDir,
@@ -573,12 +556,10 @@ describe("executeRebase end-to-end", () => {
         snapshot: mySnap,
         timestamp: "20250102000000",
         name: "add_email",
-        classification: "generated",
-        manualStatements: [],
       },
     ]
 
-    const plan: RebasePlan = { safeToDelete: mine, needsAttention: [], kept }
+    const plan: RebasePlan = { mine, kept }
 
     const result = await executeRebase({ migrationsDir: testDir, cwd: testDir, plan })
 
@@ -643,7 +624,7 @@ describe("executeRebase end-to-end", () => {
     await writeFile(join(myDir2, "migration.sql"), sql2)
     await writeFile(join(myDir2, "snapshot.json"), JSON.stringify(mySnap2, null, 2))
 
-    const kept: ClassifiedMigration[] = [
+    const kept: Migration[] = [
       {
         dirName: "20250101000000_initial",
         dirPath: theirDir,
@@ -651,13 +632,11 @@ describe("executeRebase end-to-end", () => {
         snapshot: theirSnap,
         timestamp: "20250101000000",
         name: "initial",
-        classification: "generated",
-        manualStatements: [],
       },
     ]
 
     const plan: RebasePlan = {
-      safeToDelete: [
+      mine: [
         {
           dirName: myDir1Name,
           dirPath: myDir1,
@@ -665,8 +644,6 @@ describe("executeRebase end-to-end", () => {
           snapshot: mySnap1,
           timestamp: "20250102000000",
           name: "add_email",
-          classification: "generated",
-          manualStatements: [],
         },
         {
           dirName: myDir2Name,
@@ -675,11 +652,8 @@ describe("executeRebase end-to-end", () => {
           snapshot: mySnap2,
           timestamp: "20250103000000",
           name: "email_not_null",
-          classification: "generated",
-          manualStatements: [],
         },
       ],
-      needsAttention: [],
       kept,
     }
 
@@ -768,7 +742,7 @@ describe("executeRebase end-to-end", () => {
     await writeFile(join(myDir, "migration.sql"), originalSql)
     await writeFile(join(myDir, "snapshot.json"), JSON.stringify(mySnap, null, 2))
 
-    const kept: ClassifiedMigration[] = [
+    const kept: Migration[] = [
       {
         dirName: "20250100000000_base",
         dirPath: sharedDir,
@@ -776,8 +750,6 @@ describe("executeRebase end-to-end", () => {
         snapshot: sharedSnap,
         timestamp: "20250100000000",
         name: "base",
-        classification: "generated",
-        manualStatements: [],
       },
       {
         dirName: "20250101000000_add_email_theirs",
@@ -786,13 +758,11 @@ describe("executeRebase end-to-end", () => {
         snapshot: theirSnap,
         timestamp: "20250101000000",
         name: "add_email_theirs",
-        classification: "generated",
-        manualStatements: [],
       },
     ]
 
     const plan: RebasePlan = {
-      safeToDelete: [
+      mine: [
         {
           dirName: myDirName,
           dirPath: myDir,
@@ -800,11 +770,8 @@ describe("executeRebase end-to-end", () => {
           snapshot: mySnap,
           timestamp: "20250102000000",
           name: "add_email",
-          classification: "generated",
-          manualStatements: [],
         },
       ],
-      needsAttention: [],
       kept,
     }
 
@@ -840,7 +807,7 @@ describe("executeRebase end-to-end", () => {
     await writeFile(join(myDir, "snapshot.json"), JSON.stringify(mySnap, null, 2))
 
     const plan: RebasePlan = {
-      safeToDelete: [
+      mine: [
         {
           dirName: myDirName,
           dirPath: myDir,
@@ -848,11 +815,8 @@ describe("executeRebase end-to-end", () => {
           snapshot: mySnap,
           timestamp: "20250102000000",
           name: "add_email",
-          classification: "generated",
-          manualStatements: [],
         },
       ],
-      needsAttention: [],
       kept: [],
     }
 
@@ -911,7 +875,7 @@ describe("executeRebase end-to-end", () => {
     await writeFile(join(myDir, "migration.sql"), originalSql)
     await writeFile(join(myDir, "snapshot.json"), JSON.stringify(mySnap, null, 2))
 
-    const kept: ClassifiedMigration[] = [
+    const kept: Migration[] = [
       {
         dirName: "20250101000000_initial",
         dirPath: sharedDir,
@@ -919,8 +883,6 @@ describe("executeRebase end-to-end", () => {
         snapshot: sharedSnap,
         timestamp: "20250101000000",
         name: "initial",
-        classification: "generated",
-        manualStatements: [],
       },
       {
         dirName: "20250102000000_add_orders",
@@ -929,13 +891,11 @@ describe("executeRebase end-to-end", () => {
         snapshot: theirSnap,
         timestamp: "20250102000000",
         name: "add_orders",
-        classification: "generated",
-        manualStatements: [],
       },
     ]
 
     const plan: RebasePlan = {
-      safeToDelete: [
+      mine: [
         {
           dirName: myDirName,
           dirPath: myDir,
@@ -943,11 +903,8 @@ describe("executeRebase end-to-end", () => {
           snapshot: mySnap,
           timestamp: "20250103000000",
           name: "add_email",
-          classification: "generated",
-          manualStatements: [],
         },
       ],
-      needsAttention: [],
       kept,
     }
 
@@ -980,7 +937,7 @@ describe("executeRebase end-to-end", () => {
     await rm(testDir, { recursive: true })
   })
 
-  test("needsAttention migrations are also rebased", async () => {
+  test("manual migration is also rebased", async () => {
     const testDir = join(tmpdir(), `drizzle-rebase-e2e-attention-${Date.now()}`)
     await mkdir(testDir, { recursive: true })
 
@@ -1000,7 +957,7 @@ describe("executeRebase end-to-end", () => {
     await writeFile(join(myDir, "migration.sql"), manualSql)
     await writeFile(join(myDir, "snapshot.json"), JSON.stringify(mySnap, null, 2))
 
-    const kept: ClassifiedMigration[] = [
+    const kept: Migration[] = [
       {
         dirName: "20250101000000_initial",
         dirPath: theirDir,
@@ -1008,14 +965,11 @@ describe("executeRebase end-to-end", () => {
         snapshot: theirSnap,
         timestamp: "20250101000000",
         name: "initial",
-        classification: "generated",
-        manualStatements: [],
       },
     ]
 
     const plan: RebasePlan = {
-      safeToDelete: [],
-      needsAttention: [
+      mine: [
         {
           dirName: myDirName,
           dirPath: myDir,
@@ -1023,8 +977,6 @@ describe("executeRebase end-to-end", () => {
           snapshot: mySnap,
           timestamp: "20250102000000",
           name: "backfill",
-          classification: "manual",
-          manualStatements: [manualSql],
         },
       ],
       kept,
@@ -1048,7 +1000,7 @@ describe("executeRebase end-to-end", () => {
     const testDir = join(tmpdir(), `drizzle-rebase-e2e-empty-${Date.now()}`)
     await mkdir(testDir, { recursive: true })
 
-    const plan: RebasePlan = { safeToDelete: [], needsAttention: [], kept: [] }
+    const plan: RebasePlan = { mine: [], kept: [] }
     const result = await executeRebase({ migrationsDir: testDir, cwd: testDir, plan })
 
     expect(result.success).toBe(true)

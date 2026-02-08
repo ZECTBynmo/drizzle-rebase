@@ -1,7 +1,7 @@
 import { basename, dirname } from "node:path"
 import { getAddedFiles, getMergeBase } from "../git"
-import { classifyAll, scanMigrations } from "../migration"
-import type { ClassifiedMigration } from "../types"
+import { scanMigrations } from "../migration"
+import type { Migration } from "../types"
 
 interface PlanRebaseOptions {
   migrationsDir: string
@@ -10,9 +10,8 @@ interface PlanRebaseOptions {
 }
 
 export interface RebasePlan {
-  safeToDelete: ClassifiedMigration[]
-  needsAttention: ClassifiedMigration[]
-  kept: ClassifiedMigration[]
+  mine: Migration[]
+  kept: Migration[]
 }
 
 export async function planRebase({
@@ -26,53 +25,24 @@ export async function planRebase({
   const addedDirs = new Set(addedFiles.map((f) => basename(dirname(f))))
 
   const allMigrations = await scanMigrations(migrationsDir)
-  const classified = classifyAll(allMigrations)
 
-  const myMigrations = classified.filter((m) => addedDirs.has(m.dirName))
-  const theirMigrations = classified.filter((m) => !addedDirs.has(m.dirName))
+  const mine = allMigrations.filter((m) => addedDirs.has(m.dirName))
+  const kept = allMigrations.filter((m) => !addedDirs.has(m.dirName))
 
-  const safeToDelete: ClassifiedMigration[] = []
-  const needsAttention: ClassifiedMigration[] = []
-
-  for (const m of myMigrations) {
-    if (m.classification === "generated") {
-      safeToDelete.push(m)
-    } else {
-      needsAttention.push(m)
-    }
-  }
-
-  return { safeToDelete, needsAttention, kept: theirMigrations }
+  return { mine, kept }
 }
 
 export function formatRebasePlan(plan: RebasePlan): string {
   const lines: string[] = []
 
-  if (plan.safeToDelete.length === 0 && plan.needsAttention.length === 0) {
+  if (plan.mine.length === 0) {
     lines.push("No migrations from your branch found. Nothing to rebase.")
     return lines.join("\n")
   }
 
-  const allMine = [...plan.safeToDelete, ...plan.needsAttention].sort((a, b) =>
-    a.timestamp.localeCompare(b.timestamp),
-  )
-
   lines.push("Will rebase:")
-  for (const m of allMine) {
-    const tag = m.classification === "generated" ? "generated" : m.classification
-    lines.push(`  - ${m.dirName} [${tag}]`)
-  }
-
-  if (plan.needsAttention.length > 0) {
-    lines.push("")
-    lines.push("Manual/mixed migrations (SQL will be preserved as-is):")
-    for (const m of plan.needsAttention) {
-      lines.push(`  ~ ${m.dirName}`)
-      for (const stmt of m.manualStatements) {
-        const preview = stmt.split("\n")[0]?.slice(0, 80) ?? ""
-        lines.push(`      ${preview}`)
-      }
-    }
+  for (const m of plan.mine) {
+    lines.push(`  - ${m.dirName}`)
   }
 
   lines.push("")

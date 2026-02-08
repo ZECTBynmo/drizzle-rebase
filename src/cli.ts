@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 
 import { resolve } from "node:path"
-import { detect, formatDetectResult } from "./cli/detect"
 import { formatRebasePlan, planRebase } from "./cli/rebase"
 import { executeRebase, formatRebaseResult } from "./cli/run"
 
@@ -9,9 +8,6 @@ const HELP = `
 drizzle-rebase — Detect and resolve Drizzle migration conflicts across git branches
 
 Usage:
-  drizzle-rebase detect [--dir <path>]
-    Classify all migrations as generated, manual, or mixed.
-
   drizzle-rebase plan [--dir <path>] [--base <branch>]
     Show what would happen during a rebase (dry run).
 
@@ -67,12 +63,6 @@ async function main() {
   const cwd = process.cwd()
 
   switch (command) {
-    case "detect": {
-      const result = await detect({ migrationsDir })
-      console.log(formatDetectResult(result))
-      break
-    }
-
     case "plan": {
       const plan = await planRebase({ migrationsDir, baseBranch, cwd })
       console.log(formatRebasePlan(plan))

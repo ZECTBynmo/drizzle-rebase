@@ -1,12 +1,12 @@
 import { cp, mkdir, rm } from "node:fs/promises"
 import { join } from "node:path"
-import type { ClassifiedMigration, BackupHandle } from "../types"
+import type { Migration, BackupHandle } from "../types"
 
 const BACKUP_DIR_NAME = ".drizzle-rebase-backup"
 
 export async function backupMigrations(
   migrationsDir: string,
-  migrations: ClassifiedMigration[],
+  migrations: Migration[],
 ): Promise<BackupHandle> {
   const backupDir = join(migrationsDir, BACKUP_DIR_NAME)
 
@@ -39,7 +39,7 @@ export async function cleanupBackup(handle: BackupHandle): Promise<void> {
   await rm(handle.backupDir, { recursive: true, force: true })
 }
 
-export async function deleteMigrationDirs(migrations: ClassifiedMigration[]): Promise<string[]> {
+export async function deleteMigrationDirs(migrations: Migration[]): Promise<string[]> {
   const deleted: string[] = []
   for (const m of migrations) {
     await rm(m.dirPath, { recursive: true })
