@@ -1,14 +1,19 @@
 {
   "name": "drizzle-rebase",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Detect and resolve Drizzle ORM migration conflicts across git branches",
   "type": "module",
   "bin": {
     "drizzle-rebase": "./dist/cli.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "README.md"
   ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ZECTBynmo/drizzle-rebase.git"
+  },
   "scripts": {
     "dev": "bun run src/cli.ts",
     "build": "bun build src/cli.ts --outdir dist --target node",
